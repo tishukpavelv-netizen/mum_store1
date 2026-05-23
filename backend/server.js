@@ -3,11 +3,30 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// --- НАСТРОЙКА ЗАГРУЗКИ ФАЙЛОВ ---
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)){
+    fs.mkdirSync(uploadDir);
+}
+// Раздаем статику, чтобы фронтенд мог получить картинки по ссылке /uploads/...
+app.use('/uploads', express.static(uploadDir));
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname));
+  }
+});
+const upload = multer({ storage });
 
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -29,7 +48,7 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// --- РОУТЫ ---
+// --- РОУТЫ АВТОРИЗАЦИИ ---
 
 app.post('/api/register', async (req, res) => {
   const { email, password } = req.body;
@@ -80,7 +99,8 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Получить все товары
+// --- РОУТЫ ТОВАРОВ ---
+
 app.get('/api/products', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM products ORDER BY id DESC');
@@ -90,7 +110,13 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
-// ДОБАВИТЬ ТОВАР (Админ)
+// Роут для загрузки картинок
+app.post('/api/upload', authenticateToken, upload.array('photos', 5), (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: "Нет прав" });
+  const fileUrls = req.files.map(file => `/uploads/${file.filename}`);
+  res.json({ urls: fileUrls });
+});
+
 app.post('/api/products', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: "Нет прав" });
   const { title, description, price, stock, image_urls } = req.body;
@@ -105,7 +131,6 @@ app.post('/api/products', authenticateToken, async (req, res) => {
   }
 });
 
-// ИЗМЕНИТЬ ТОВАР (Админ)
 app.put('/api/products/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: "Нет прав" });
   const { id } = req.params;
@@ -122,7 +147,6 @@ app.put('/api/products/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// УДАЛИТЬ ТОВАР (Админ)
 app.delete('/api/products/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: "Нет прав" });
   const { id } = req.params;
@@ -135,13 +159,12 @@ app.delete('/api/products/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// ОФОРМЛЕНИЕ И ОПЛАТА ЗАКАЗА (ИСПРАВЛЕНО)
+// --- РОУТЫ ЗАКАЗОВ ---
+
 app.post('/api/orders', authenticateToken, async (req, res) => {
   const { total, items } = req.body; 
   try {
     await pool.query('BEGIN');
-    
-    // Сохраняем заказ, включая сериализованный JSON-массив товаров в поле items
     const orderResult = await pool.query(
       'INSERT INTO orders (user_id, total, items) VALUES ($1, $2, $3) RETURNING id',
       [req.user.id, total, JSON.stringify(items)]
@@ -151,16 +174,12 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     if (items && Array.isArray(items)) {
       for (const item of items) {
         const prodCheck = await pool.query('SELECT stock FROM products WHERE id = $1', [item.id]);
-        
-        // ЗАЩИТА: Проверяем, существует ли вообще запись о товаре в БД
         if (prodCheck.rows.length === 0) {
-          throw new Error(`Один из товаров в вашей корзине (ID: ${item.id}) был удален администратором. Пожалуйста, очистите корзину.`);
+          throw new Error(`Один из товаров в вашей корзине (ID: ${item.id}) был удален администратором.`);
         }
-
         if (prodCheck.rows[0].stock < item.quantity) {
           throw new Error("Недостаточно товара на складе!");
         }
-        
         await pool.query('UPDATE products SET stock = stock - $1 WHERE id = $2', [item.quantity, item.id]);
       }
     }
