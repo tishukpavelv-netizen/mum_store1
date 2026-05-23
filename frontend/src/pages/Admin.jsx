@@ -1,20 +1,21 @@
 import { useContext, useState, useEffect } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { Navigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 
 export const Admin = () => {
   const { user } = useContext(AuthContext);
   
-  const [activeTab, setActiveTab] = useState('add'); // 'add' или 'manage'
+  const [activeTab, setActiveTab] = useState('add'); 
   const [products, setProducts] = useState([]);
   
-  // Поля формы
   const [editingId, setEditingId] = useState(null); 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
   const [stock, setStock] = useState('');
   const [images, setImages] = useState(['']); 
+  const [localFiles, setLocalFiles] = useState([]); 
 
   useEffect(() => {
     if (activeTab === 'manage') {
@@ -26,12 +27,11 @@ export const Admin = () => {
     fetch('/api/products')
       .then(res => res.json())
       .then(data => setProducts(data))
-      .catch(err => console.error(err));
+      .catch(err => toast.error("Ошибка загрузки товаров"));
   };
 
   if (!user || user.role !== 'admin') return <Navigate to="/" />;
 
-  // Управление массивом картинок
   const handleImageChange = (index, value) => {
     const newImages = [...images];
     newImages[index] = value;
@@ -41,12 +41,36 @@ export const Admin = () => {
   const addImageField = () => setImages([...images, '']);
   const removeImageField = (index) => setImages(images.filter((_, i) => i !== index));
 
-  // Сохранение / Изменение
   const handleSubmit = async (e) => {
     e.preventDefault();
     const token = localStorage.getItem('token');
     const cleanImages = images.filter(url => url.trim() !== '');
 
+    let uploadedUrls = [];
+    
+    if (localFiles.length > 0) {
+      const formData = new FormData();
+      localFiles.forEach(file => formData.append('photos', file));
+      
+      try {
+        const uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData
+        });
+        
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          uploadedUrls = uploadData.urls;
+        } else {
+          return toast.error("Ошибка при загрузке фотографий");
+        }
+      } catch (error) {
+        return toast.error("Ошибка сети при загрузке фото");
+      }
+    }
+
+    const finalImages = [...cleanImages, ...uploadedUrls];
     const url = editingId ? `/api/products/${editingId}` : '/api/products';
     const method = editingId ? 'PUT' : 'POST';
 
@@ -57,27 +81,58 @@ export const Admin = () => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ title, description, price: Number(price), stock: Number(stock), image_urls: cleanImages })
+        body: JSON.stringify({ title, description, price: Number(price), stock: Number(stock), image_urls: finalImages })
       });
       
       if (res.ok) {
-        alert(editingId ? "Товар успешно обновлен!" : "Товар успешно добавлен!");
+        toast.success(editingId ? "Товар успешно обновлен!" : "Товар успешно добавлен!");
         resetForm();
         setActiveTab('manage');
       } else {
         const err = await res.json();
-        alert(err.error || "Ошибка при сохранении");
+        toast.error(err.error || "Ошибка при сохранении");
       }
     } catch (err) {
-      console.error(err);
+      toast.error("Ошибка сети при сохранении товара");
     }
   };
 
-  // УДАЛЕНИЕ ТОВАРА (Теперь с выводом ошибок сервера)
-  const handleDelete = async (id) => {
-    if (!window.confirm("Вы точно хотите удалить этот товар с концами?")) return;
-    const token = localStorage.getItem('token');
+  // --- ИСПРАВЛЕНО: КРАСИВОЕ УВЕДОМЛЕНИЕ ДЛЯ УДАЛЕНИЯ ---
+  const confirmDelete = (id) => {
+    toast(
+      (t) => (
+        <div style={{ padding: '5px' }}>
+          <p style={{ margin: '0 0 15px 0', fontWeight: 'bold', fontSize: '15px' }}>Вы точно хотите удалить этот товар?</p>
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+            <button 
+              onClick={() => {
+                toast.dismiss(t.id);
+                executeDelete(id);
+              }}
+              style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }}
+            >
+              Да, удалить
+            </button>
+            <button 
+              onClick={() => toast.dismiss(t.id)}
+              style={{ background: '#f1f5f9', color: 'var(--text-main)', border: 'none', padding: '8px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }}
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      ),
+      { 
+        duration: 8000, 
+        position: 'top-center',
+        style: { border: '1px solid #f87171' } // Добавляем красную рамку для акцента
+      }
+    );
+  };
 
+  // Сама логика удаления, которая вызывается, если нажали "Да"
+  const executeDelete = async (id) => {
+    const token = localStorage.getItem('token');
     try {
       const res = await fetch(`/api/products/${id}`, {
         method: 'DELETE',
@@ -85,21 +140,17 @@ export const Admin = () => {
       });
       
       if (res.ok) {
-        // Если сервер удалил, убираем товар из списка на экране
         setProducts(products.filter(p => p.id !== id));
-        alert("Товар успешно удален с витрины.");
+        toast.success("Товар успешно удален с витрины.");
       } else {
-        // Если сервер вернул ошибку (например, 401 или 403)
         const errData = await res.json();
-        alert(`Не удалось удалить: ${errData.error || "Ошибка сервера"}`);
+        toast.error(`Не удалось удалить: ${errData.error || "Ошибка сервера"}`);
       }
     } catch (err) {
-      console.error(err);
-      alert("Ошибка сети. Не удалось связаться с бэкендом.");
+      toast.error("Ошибка сети. Не удалось связаться с бэкендом.");
     }
   };
 
-  // Включение режима редактирования
   const startEdit = (product) => {
     setEditingId(product.id);
     setTitle(product.title);
@@ -107,6 +158,7 @@ export const Admin = () => {
     setPrice(product.price);
     setStock(product.stock);
     setImages(product.image_urls && product.image_urls.length > 0 ? product.image_urls : ['']);
+    setLocalFiles([]);
     setActiveTab('add');
   };
 
@@ -117,11 +169,11 @@ export const Admin = () => {
     setPrice('');
     setStock('');
     setImages(['']);
+    setLocalFiles([]);
   };
 
   return (
     <div style={{ maxWidth: '800px', margin: '30px auto' }}>
-      {/* Навигация панели */}
       <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
         <button 
           className="btn-primary" 
@@ -139,7 +191,6 @@ export const Admin = () => {
         </button>
       </div>
 
-      {/* ВКЛАДКА 1: ФОРМА */}
       {activeTab === 'add' && (
         <div className="card" style={{ maxWidth: '100%', margin: 0 }}>
           <h2 style={{ marginBottom: '20px', color: 'var(--wb-purple)' }}>
@@ -154,8 +205,23 @@ export const Admin = () => {
               <input type="number" placeholder="Количество на склад" required className="input-field" value={stock} onChange={e => setStock(e.target.value)} />
             </div>
 
+            <div style={{ marginBottom: '20px', padding: '15px', background: '#f8f9fc', borderRadius: '12px' }}>
+              <label style={{ fontSize: '14px', fontWeight: 'bold', display: 'block', marginBottom: '10px' }}>Загрузить локальные фотографии:</label>
+              <input 
+                type="file" 
+                multiple 
+                accept="image/*" 
+                onChange={e => setLocalFiles(Array.from(e.target.files))} 
+                className="input-field" 
+                style={{ background: 'white', cursor: 'pointer', padding: '10px' }}
+              />
+              {localFiles.length > 0 && (
+                <p style={{ fontSize: '13px', color: '#10b981', marginTop: '5px' }}>Выбрано файлов: {localFiles.length}</p>
+              )}
+            </div>
+
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ fontSize: '14px', fontWeight: 'bold', display: 'block', marginBottom: '10px' }}>Ссылки на фотографии:</label>
+              <label style={{ fontSize: '14px', fontWeight: 'bold', display: 'block', marginBottom: '10px' }}>Или вставьте ссылки из интернета:</label>
               {images.map((url, idx) => (
                 <div key={idx} style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
                   <input 
@@ -177,7 +243,6 @@ export const Admin = () => {
         </div>
       )}
 
-      {/* ВКЛАДКА 2: ТАБЛИЦА ТОВАРОВ */}
       {activeTab === 'manage' && (
         <div style={{ background: 'white', padding: '25px', borderRadius: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
           <h2 style={{ marginBottom: '20px' }}>Все товары в базе данных</h2>
@@ -208,7 +273,8 @@ export const Admin = () => {
                       <td>
                         <div style={{ display: 'flex', gap: '10px' }}>
                           <button onClick={() => startEdit(p)} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer' }}>Изменить</button>
-                          <button onClick={() => handleDelete(p.id)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer' }}>Удалить</button>
+                          {/* ИСПРАВЛЕНО ЗДЕСЬ: вызываем функцию confirmDelete вместо старой handleDelete */}
+                          <button onClick={() => confirmDelete(p.id)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer' }}>Удалить</button>
                         </div>
                       </td>
                     </tr>

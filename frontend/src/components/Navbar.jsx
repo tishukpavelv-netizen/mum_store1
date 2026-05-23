@@ -1,5 +1,5 @@
-import { Link, useNavigate } from 'react-router-dom';
-import { useContext, useState } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useContext, useState, useEffect, useRef } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { CartContext } from '../context/CartContext';
 
@@ -7,22 +7,65 @@ export const Navbar = () => {
   const { user, logout } = useContext(AuthContext);
   const { cart } = useContext(CartContext);
   const navigate = useNavigate();
+  const location = useLocation(); 
   
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  const [allProducts, setAllProducts] = useState([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef(null);
 
-  // Считаем ОБЩЕЕ количество предметов в корзине (сумма всех quantity)
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  useEffect(() => {
+    fetch('/api/products')
+      .then(res => res.json())
+      .then(data => setAllProducts(data))
+      .catch(err => console.error("Ошибка загрузки товаров для поиска", err));
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleLogout = () => {
     logout();
     navigate('/');
   };
 
+  const handleSearchChange = (e) => {
+    const val = e.target.value;
+    setSearchQuery(val);
+    setShowDropdown(val.trim().length > 0);
+
+    // Мгновенно обновляем каталог, если мы на главной странице
+    if (location.pathname === '/') {
+      navigate(val.trim() ? `/?q=${encodeURIComponent(val)}` : '/', { replace: true });
+    }
+  };
+
   const handleSearchSubmit = (e) => {
     e.preventDefault();
+    setShowDropdown(false);
     navigate(`/?q=${encodeURIComponent(searchQuery)}`);
   };
+
+  const handlePreviewClick = (title) => {
+    setSearchQuery(title);
+    setShowDropdown(false);
+    navigate(`/?q=${encodeURIComponent(title)}`);
+  };
+
+  const searchResults = allProducts
+    .filter(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    .slice(0, 5); // Показываем максимум 5 подсказок
 
   return (
     <nav className="nav">
@@ -33,27 +76,53 @@ export const Navbar = () => {
           MomStore
         </Link>
 
-        {/* Раскрывающийся поиск */}
-        <form 
-          className={`search-form ${isSearchOpen ? 'active' : ''}`} 
-          onSubmit={handleSearchSubmit}
-        >
-          <button 
-            type="button" 
-            className="search-btn"
-            onClick={() => setIsSearchOpen(!isSearchOpen)}
-            title="Поиск"
+        <div ref={dropdownRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <form 
+            className={`search-form ${isSearchOpen ? 'active' : ''}`} 
+            onSubmit={handleSearchSubmit}
           >
-            🔍
-          </button>
-          <input 
-            type="text" 
-            className={`nav-search ${isSearchOpen ? 'expanded' : ''}`} 
-            placeholder="Искать товары..." 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </form>
+            <button 
+              type="button" 
+              className="search-btn"
+              onClick={() => setIsSearchOpen(!isSearchOpen)}
+              title="Поиск"
+            >
+              🔍
+            </button>
+            <input 
+              type="text" 
+              className={`nav-search ${isSearchOpen ? 'expanded' : ''}`} 
+              placeholder="Искать товары..." 
+              value={searchQuery}
+              onChange={handleSearchChange}
+              onFocus={() => { 
+                setIsSearchOpen(true); 
+                if (searchQuery.trim().length > 0) setShowDropdown(true); 
+              }}
+            />
+          </form>
+
+          {showDropdown && isSearchOpen && searchResults.length > 0 && (
+            <div className="search-dropdown">
+              {searchResults.map((product) => (
+                <div 
+                  key={product.id} 
+                  className="search-dropdown-item"
+                  onClick={() => handlePreviewClick(product.title)}
+                >
+                  <img 
+                    src={product.image_urls && product.image_urls[0] ? product.image_urls[0] : 'https://images.unsplash.com/photo-1555252333-9f8e92e65df9?w=100'} 
+                    alt={product.title} 
+                  />
+                  <div className="search-dropdown-info">
+                    <div className="search-dropdown-title">{product.title}</div>
+                    <div className="search-dropdown-price">{product.price} ₽</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="nav-links">
           {user && user.role === 'admin' && (

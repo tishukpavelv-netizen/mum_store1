@@ -1,17 +1,16 @@
 :root {
   --wb-purple: #cb11ab;
   --gradient-primary: linear-gradient(135deg, #cb11ab 0%, #ff33c4 100%);
-  --bg-gray: #f4f6f8; /* Более мягкий современный фон */
+  --bg-gray: #f4f6f8; 
   --text-main: #1f2937;
   --text-muted: #6b7280;
-  --card-radius: 20px; /* Более округлые углы */
+  --card-radius: 20px; 
 }
 
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  /* Новый шрифт Inter */
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -29,7 +28,7 @@ body {
 
 /* --- Шапка (Navbar) --- */
 .nav {
-  background: var(--gradient-primary); /* Градиент в шапке */
+  background: var(--gradient-primary);
   padding: 15px 0;
   margin-bottom: 30px;
   box-shadow: 0 4px 20px rgba(203, 17, 171, 0.2);
@@ -53,7 +52,6 @@ body {
   letter-spacing: -0.5px;
 }
 
-/* Значок возле логотипа */
 .logo-icon {
   background: white;
   border-radius: 50%;
@@ -112,7 +110,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* Мягкая современная тень */
   box-shadow: 0 4px 6px rgba(0,0,0,0.02), 0 10px 15px -3px rgba(0,0,0,0.03);
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   border: 1px solid rgba(255, 255, 255, 0.8);
@@ -204,7 +201,7 @@ body {
   display: flex;
   align-items: center;
   background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(8px); /* Эффект матового стекла */
+  backdrop-filter: blur(8px); 
   border-radius: 24px;
   transition: background-color 0.3s ease, box-shadow 0.3s ease;
   margin: 0 15px;
@@ -244,4 +241,75 @@ body {
 .nav-search.expanded {
   width: 280px;
   padding: 10px 20px 10px 0;
+}
+
+/* --- Стили для выпадающего поиска (Живой поиск) --- */
+.search-dropdown {
+  position: absolute;
+  top: calc(100% + 15px);
+  left: 15px; 
+  width: 280px; 
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  overflow: hidden;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  animation: fadeIn 0.2s ease;
+  border: 1px solid #f1f5f9;
+}
+
+.search-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 15px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  border-bottom: 1px solid #f0f0f0;
+  color: var(--text-main);
+}
+
+.search-dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.search-dropdown-item:hover {
+  background: #f8f9fc;
+}
+
+.search-dropdown-item img {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #f4f6f8;
+}
+
+.search-dropdown-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.search-dropdown-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.search-dropdown-price {
+  font-size: 13px;
+  color: var(--wb-purple);
+  font-weight: 800;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
 }

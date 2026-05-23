@@ -1,4 +1,5 @@
 import { createContext, useState } from 'react';
+import toast from 'react-hot-toast'; // ДОБАВЛЕНО
 
 export const CartContext = createContext();
 
@@ -13,9 +14,11 @@ export const CartProvider = ({ children }) => {
       if (existingItem) {
         // Если в корзине уже лежит максимум того, что есть на складе
         if (existingItem.quantity >= product.stock) {
-          alert(`Разместить больше нельзя. На складе осталось всего: ${product.stock} шт.`);
+          toast.error(`Разместить больше нельзя. На складе осталось всего: ${product.stock} шт.`);
           return prevCart;
         }
+        // Уведомление, если товар уже был, но мы увеличили его количество
+        toast.success(`Ещё одна "${product.title}" добавлена в корзину!`);
         return prevCart.map((item) =>
           item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
@@ -23,13 +26,14 @@ export const CartProvider = ({ children }) => {
 
       // Если товара вообще нет на складе
       if (product.stock <= 0) {
-        alert("Извините, этого товара нет в наличии.");
+        toast.error("Извините, этого товара нет в наличии.");
         return prevCart;
       }
 
+      // Уведомление при первом добавлении (как на вашем скриншоте)
+      toast.success(`"${product.title}" добавлен в корзину!`);
       return [...prevCart, { ...product, quantity: 1 }];
     });
-    alert(`"${product.title}" добавлен в корзину!`);
   };
 
   // Изменение количества через кнопки +/- с проверкой лимита склада
@@ -42,7 +46,7 @@ export const CartProvider = ({ children }) => {
             
             // Если пытаемся нажать "+" выше доступного на складе
             if (amount > 0 && newQty > item.stock) {
-              alert(`Невозможно добавить больше. Доступный остаток: ${item.stock} шт.`);
+              toast.error(`Невозможно добавить больше. Доступный остаток: ${item.stock} шт.`);
               return item;
             }
             
@@ -56,6 +60,7 @@ export const CartProvider = ({ children }) => {
 
   const removeFromCart = (productId) => {
     setCart((prevCart) => prevCart.filter((item) => item.id !== productId));
+    toast.success("Товар удален из корзины"); // Добавлено приятное уведомление
   };
 
   const clearCart = () => setCart([]);

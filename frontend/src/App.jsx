@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import { Navbar } from './components/Navbar';
 import { Catalog } from './pages/Catalog';
 import { Cart } from './pages/Cart';
@@ -10,8 +11,9 @@ import { Admin } from './pages/Admin';
 function App() {
   return (
     <div>
-      <Navbar /> {/* Шапка теперь на всю ширину */}
-      <div className="container"> {/* Ограничитель ширины только для страниц */}
+      <Navbar />
+      <Toaster position="bottom-right" reverseOrder={false} />
+      <div className="container">
         <Routes>
           <Route path="/" element={<Catalog />} />
           <Route path="/cart" element={<Cart />} />

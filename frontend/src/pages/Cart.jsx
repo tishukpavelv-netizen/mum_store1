@@ -1,6 +1,7 @@
 import { useContext } from 'react';
 import { CartContext } from '../context/CartContext.jsx';
 import { AuthContext } from '../context/AuthContext.jsx';
+import toast from 'react-hot-toast';
 
 export const Cart = () => {
   const { cart, updateQuantity, removeFromCart, clearCart } = useContext(CartContext);
@@ -9,16 +10,21 @@ export const Cart = () => {
   const total = cart.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
 
   const handlePayment = async () => {
-    if (!user) return alert("Вы должны войти в систему для оплаты заказа!");
-    if (cart.length === 0) return alert("Ваша корзина пуста!");
+    if (!user) return toast.error("Вы должны войти в систему для оплаты заказа!");
+    if (cart.length === 0) return toast.error("Ваша корзина пуста!");
     
     const token = localStorage.getItem('token');
     
-    // Формируем компактный массив товаров для отправки на бэкенд
+    // ИЗМЕНЕНИЕ: Теперь мы сохраняем "слепок" товара для истории
     const orderItems = cart.map(item => ({
       id: item.id,
-      quantity: item.quantity
+      quantity: item.quantity,
+      title: item.title, // Сохраняем имя
+      price: item.price, // Сохраняем цену на момент покупки
+      image: item.image_urls && item.image_urls[0] ? item.image_urls[0] : null // Сохраняем главную картинку
     }));
+
+    const paymentToast = toast.loading('Обработка заказа...');
 
     try {
       const res = await fetch('/api/orders', {
@@ -33,14 +39,14 @@ export const Cart = () => {
       const data = await res.json();
 
       if (res.ok) {
-        alert(`🎉 Заказ успешно оплачен!\nНомер заказа: #00${data.orderId}\nОстатки на складе автоматически обновлены для всех покупателей.`);
-        clearCart(); // Очищаем корзину во фронтенде после успешного списания
+        toast.success(`Заказ #00${data.orderId} успешно оформлен и оплачен!`, { id: paymentToast, duration: 5000 });
+        clearCart(); 
       } else {
-        alert(`Ошибка: ${data.error || "Не удалось совершить покупку"}`);
+        toast.error(`Ошибка: ${data.error || "Не удалось совершить покупку"}`, { id: paymentToast });
       }
     } catch (err) {
       console.error(err);
-      alert("Ошибка при обработке платежа сервером.");
+      toast.error("Ошибка при обработке платежа сервером.", { id: paymentToast });
     }
   };
 
@@ -72,7 +78,6 @@ export const Cart = () => {
                 </div>
               </div>
 
-              {/* Управление количеством */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#f4f6f8', padding: '6px 12px', borderRadius: '10px' }}>
                 <button 
                   onClick={() => updateQuantity(item.id, -1)}
@@ -89,7 +94,6 @@ export const Cart = () => {
                 </button>
               </div>
 
-              {/* Стоимость */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
                 <strong style={{ fontSize: '18px', minWidth: '90px', textAlign: 'right' }}>
                   {item.price * item.quantity} ₽
@@ -97,6 +101,7 @@ export const Cart = () => {
                 <button 
                   onClick={() => removeFromCart(item.id)}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#ef4444' }}
+                  title="Удалить из корзины"
                 >
                   🗑️
                 </button>
@@ -106,7 +111,6 @@ export const Cart = () => {
         </ul>
       )}
       
-      {/* Детали заказа */}
       <div style={{ marginTop: '35px', padding: '25px', background: '#f8f9fc', borderRadius: '16px', border: '1px solid #f1f5f9' }}>
         <h3 style={{ fontSize: '18px', marginBottom: '15px' }}>Детали заказа</h3>
         <div style={{ display: 'flex', justifyContent: 'space-between', margin: '15px 0' }}>

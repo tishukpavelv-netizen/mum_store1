@@ -2,12 +2,12 @@ import { useEffect, useState, useContext } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CartContext } from '../context/CartContext.jsx';
 import { AuthContext } from '../context/AuthContext.jsx';
+import toast from 'react-hot-toast'; // ДОБАВЛЕНО
 
 const getImagesArray = (product) => {
   if (product.image_urls && product.image_urls.length > 0) {
     return product.image_urls;
   }
-  // Заглушки, если картинок вообще нет
   const titleLower = product.title.toLowerCase();
   if (titleLower.includes('подушка')) return ['https://images.unsplash.com/photo-1629215160822-0d17e7ce71c6?w=600'];
   if (titleLower.includes('молокоотсос')) return ['https://images.unsplash.com/photo-1519689680058-324335c77eba?w=600'];
@@ -19,7 +19,7 @@ const getImagesArray = (product) => {
 export const Catalog = () => {
   const [products, setProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null); 
-  const [activeImgIdx, setActiveImgIdx] = useState(0); // Активная картинка в галерее
+  const [activeImgIdx, setActiveImgIdx] = useState(0); 
   
   const { addToCart } = useContext(CartContext);
   const { user } = useContext(AuthContext); 
@@ -40,7 +40,6 @@ export const Catalog = () => {
            (product.description && product.description.toLowerCase().includes(query));
   });
 
-  // --- РЕЖИМ 1: ПОДРОБНОЕ ОПИСАНИЕ ТОВАРА (ГАЛЕРЕЯ С МИНИАТЮРАМИ WB) ---
   if (selectedProduct) {
     const productImages = getImagesArray(selectedProduct);
     const isAvailable = selectedProduct.stock > 0;
@@ -56,10 +55,7 @@ export const Catalog = () => {
         </button>
         
         <div style={{ display: 'flex', gap: '30px', flexWrap: 'wrap' }}>
-          
-          {/* Блок галереи WB */}
           <div style={{ display: 'flex', gap: '15px' }}>
-            {/* Вертикальный ряд миниатюр */}
             {productImages.length > 1 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {productImages.map((imgUrl, idx) => (
@@ -76,14 +72,11 @@ export const Catalog = () => {
                 ))}
               </div>
             )}
-            
-            {/* Главное большое фото */}
             <div style={{ width: '340px', height: '450px', borderRadius: '12px', overflow: 'hidden', background: '#f8f9fc' }}>
               <img src={productImages[activeImgIdx]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             </div>
           </div>
           
-          {/* Информационный блок */}
           <div style={{ flex: 1, minWidth: '300px' }}>
             <h1 style={{ fontSize: '28px', marginBottom: '10px' }}>{selectedProduct.title}</h1>
             <p style={{ color: 'var(--text-muted)', marginBottom: '15px' }}>Бренд: MomStore</p>
@@ -106,7 +99,8 @@ export const Catalog = () => {
             <button 
               className="btn-primary"
               style={{ maxWidth: '300px', background: (user && isAvailable) ? 'var(--gradient-primary)' : '#cbd5e1', cursor: (user && isAvailable) ? 'pointer' : 'not-allowed' }}
-              onClick={() => user ? addToCart(selectedProduct) : alert("Пожалуйста, авторизуйтесь.")}
+              // ИЗМЕНЕНИЕ ЗДЕСЬ: alert заменен на toast.error
+              onClick={() => user ? addToCart(selectedProduct) : toast.error("Пожалуйста, авторизуйтесь для покупки.")}
               disabled={!user || !isAvailable}
             >
               {!user ? "Войдите для покупки" : !isAvailable ? "Нет в наличии" : "Добавить в корзину"}
@@ -117,7 +111,6 @@ export const Catalog = () => {
     );
   }
 
-  // --- РЕЖИМ 2: СЕТКА КАТАЛОГА ---
   return (
     <div>
       <h2 style={{ fontSize: '28px', marginBottom: '20px' }}>

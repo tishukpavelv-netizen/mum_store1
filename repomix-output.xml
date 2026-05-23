@@ -1,0 +1,1653 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+backend/
+  .env
+  Dockerfile
+  package.json
+  server.js
+db/
+  init.sql
+frontend/
+  src/
+    components/
+      Checkout.jsx
+      Navbar.jsx
+    context/
+      AuthContext.jsx
+      CartContext.jsx
+    pages/
+      Admin.jsx
+      Cart.jsx
+      Catalog.jsx
+      Login.jsx
+      Profile.jsx
+      Register.jsx
+    App.jsx
+    index.css
+    main.jsx
+  Dockerfile
+  index.html
+  package.json
+  vite.config.js
+docker-compose.yml
+README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="backend/.env">
+ADMIN_EMAIL=wardogepochta@gmail.com
+ADMIN_PASSWORD=admin123
+</file>
+
+<file path="backend/Dockerfile">
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+CMD ["npm", "start"]
+</file>
+
+<file path="backend/package.json">
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.11.3"
+  }
+}
+</file>
+
+<file path="backend/server.js">
+const express = require('express');
+const cors = require('cors');
+const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+require('dotenv').config();
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const pool = new Pool({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ error: "Токен не предоставлен" });
+
+  jwt.verify(token, process.env.JWT_SECRET || 'secret', (err, user) => {
+    if (err) return res.status(403).json({ error: "Неверный или просроченный токен" });
+    req.user = user; 
+    next();
+  });
+};
+
+// --- РОУТЫ ---
+
+app.post('/api/register', async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      'INSERT INTO users (email, password) VALUES ($1, $2) RETURNING id, email, role',
+      [email, hashedPassword]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(400).json({ error: "Email уже занят" });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
+      let adminResult = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+      let adminId;
+      if (adminResult.rows.length === 0) {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const newAdmin = await pool.query(
+          "INSERT INTO users (email, password, role) VALUES ($1, $2, 'admin') RETURNING id",
+          [email, hashedPassword]
+        );
+        adminId = newAdmin.rows[0].id;
+      } else {
+        adminId = adminResult.rows[0].id;
+      }
+      const token = jwt.sign({ id: adminId, role: 'admin' }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
+      return res.json({ token, user: { id: adminId, email: email, role: 'admin' } });
+    }
+
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = result.rows[0];
+    if (!user) return res.status(404).json({ error: "Пользователь не найден" });
+
+    const isValid = await bcrypt.compare(password, user.password);
+    if (!isValid) return res.status(401).json({ error: "Неверный пароль" });
+
+    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET || 'secret', { expiresIn: '24h' });
+    res.json({ token, user: { id: user.id, email: user.email, role: user.role } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Получить все товары
+app.get('/api/products', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM products ORDER BY id DESC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ДОБАВИТЬ ТОВАР (Админ)
+app.post('/api/products', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: "Нет прав" });
+  const { title, description, price, stock, image_urls } = req.body;
+  try {
+    const result = await pool.query(
+      'INSERT INTO products (title, description, price, stock, image_urls) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [title, description, price, stock, image_urls || []]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ИЗМЕНИТЬ ТОВАР (Админ)
+app.put('/api/products/:id', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: "Нет прав" });
+  const { id } = req.params;
+  const { title, description, price, stock, image_urls } = req.body;
+  try {
+    const result = await pool.query(
+      'UPDATE products SET title=$1, description=$2, price=$3, stock=$4, image_urls=$5 WHERE id=$6 RETURNING *',
+      [title, description, price, stock, image_urls || [], id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: "Товар не найден" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// УДАЛИТЬ ТОВАР (Админ)
+app.delete('/api/products/:id', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: "Нет прав" });
+  const { id } = req.params;
+  try {
+    const result = await pool.query('DELETE FROM products WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: "Товар не найден" });
+    res.json({ message: "Товар успешно удален", id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ОФОРМЛЕНИЕ И ОПЛАТА ЗАКАЗА (ИСПРАВЛЕНО)
+app.post('/api/orders', authenticateToken, async (req, res) => {
+  const { total, items } = req.body; 
+  try {
+    await pool.query('BEGIN');
+    
+    // Сохраняем заказ, включая сериализованный JSON-массив товаров в поле items
+    const orderResult = await pool.query(
+      'INSERT INTO orders (user_id, total, items) VALUES ($1, $2, $3) RETURNING id',
+      [req.user.id, total, JSON.stringify(items)]
+    );
+    const orderId = orderResult.rows[0].id;
+
+    if (items && Array.isArray(items)) {
+      for (const item of items) {
+        const prodCheck = await pool.query('SELECT stock FROM products WHERE id = $1', [item.id]);
+        
+        // ЗАЩИТА: Проверяем, существует ли вообще запись о товаре в БД
+        if (prodCheck.rows.length === 0) {
+          throw new Error(`Один из товаров в вашей корзине (ID: ${item.id}) был удален администратором. Пожалуйста, очистите корзину.`);
+        }
+
+        if (prodCheck.rows[0].stock < item.quantity) {
+          throw new Error("Недостаточно товара на складе!");
+        }
+        
+        await pool.query('UPDATE products SET stock = stock - $1 WHERE id = $2', [item.quantity, item.id]);
+      }
+    }
+    await pool.query('COMMIT');
+    res.status(201).json({ message: "Успешно", orderId });
+  } catch (err) {
+    await pool.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/orders', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
+</file>
+
+<file path="db/init.sql">
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    role VARCHAR(50) DEFAULT 'user'
+);
+
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    price INTEGER NOT NULL,
+    image_urls TEXT[], -- ИСПРАВЛЕНО: теперь это массив строк (TEXT[]), как и ожидает бэкенд
+    stock INTEGER NOT NULL DEFAULT 0 
+);
+
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    total INTEGER NOT NULL,
+    status VARCHAR(50) DEFAULT 'Оплачен',
+    items JSONB, -- ДОБАВЛЕНО: поле для хранения состава заказа (массива купленных товаров)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Тестовые товары с указанием количества на складе
+INSERT INTO products (title, description, price, stock) VALUES 
+('Подушка для беременных', 'Удобная U-образная подушка для комфортного сна', 2500, 12),
+('Молокоотсос электронный', 'Бесшумный, 2 фазы сцеживания', 4500, 5),
+('Слинг-шарф', 'Натуральный хлопок, подходит с рождения', 1800, 2),
+('Сумка в роддом', 'Прозрачная моющаяся сумка (готовый набор)', 3200, 0);
+</file>
+
+<file path="frontend/src/components/Checkout.jsx">
+import React from 'react';
+
+export const Checkout = ({ cartTotal }) => {
+    const handlePayment = () => {
+        // Требование: заглушка платежной системы
+        alert("ВНИМАНИЕ: Здесь находится кнопка для подключения платежной системы (например, Stripe или YooKassa). Платежи пока не настроены.");
+        
+        // Тут будет fetch запрос на /api/orders
+    };
+
+    return (
+        <div style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}>
+            <h2>Оформление заказа</h2>
+            <p>Итого к оплате: {cartTotal} руб.</p>
+            <button 
+                onClick={handlePayment}
+                style={{ background: '#4CAF50', color: 'white', padding: '10px 20px', cursor: 'pointer' }}
+            >
+                Оплатить заказ
+            </button>
+        </div>
+    );
+};
+</file>
+
+<file path="frontend/src/components/Navbar.jsx">
+import { Link, useNavigate } from 'react-router-dom';
+import { useContext, useState } from 'react';
+import { AuthContext } from '../context/AuthContext';
+import { CartContext } from '../context/CartContext';
+
+export const Navbar = () => {
+  const { user, logout } = useContext(AuthContext);
+  const { cart } = useContext(CartContext);
+  const navigate = useNavigate();
+  
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Считаем ОБЩЕЕ количество предметов в корзине (сумма всех quantity)
+  const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+  };
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    navigate(`/?q=${encodeURIComponent(searchQuery)}`);
+  };
+
+  return (
+    <nav className="nav">
+      <div className="container nav-inner">
+        
+        <Link to="/" className="nav-logo">
+          <div className="logo-icon">🍼</div>
+          MomStore
+        </Link>
+
+        {/* Раскрывающийся поиск */}
+        <form 
+          className={`search-form ${isSearchOpen ? 'active' : ''}`} 
+          onSubmit={handleSearchSubmit}
+        >
+          <button 
+            type="button" 
+            className="search-btn"
+            onClick={() => setIsSearchOpen(!isSearchOpen)}
+            title="Поиск"
+          >
+            🔍
+          </button>
+          <input 
+            type="text" 
+            className={`nav-search ${isSearchOpen ? 'expanded' : ''}`} 
+            placeholder="Искать товары..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </form>
+
+        <div className="nav-links">
+          {user && user.role === 'admin' && (
+            <Link to="/admin">
+              <span style={{fontSize: '22px'}}>⚙️</span> Админка
+            </Link>
+          )}
+          
+          <Link to="/cart" style={{ position: 'relative' }}>
+            <span style={{fontSize: '22px'}}>🛒</span>
+            Корзина
+            {totalItems > 0 && (
+              <span style={{
+                position: 'absolute', top: '-5px', right: '10px',
+                background: '#ff0000', color: 'white',
+                borderRadius: '50%', padding: '2px 6px',
+                fontSize: '11px', fontWeight: 'bold'
+              }}>
+                {totalItems}
+              </span>
+            )}
+          </Link>
+
+          {user ? (
+            <>
+              <Link to="/profile">
+                <span style={{fontSize: '22px'}}>👤</span> Профиль
+              </Link>
+              <button onClick={handleLogout}>
+                <span style={{fontSize: '22px'}}>🚪</span> Выйти
+              </button>
+            </>
+          ) : (
+            <>
+              <Link to="/login">
+                <span style={{fontSize: '22px'}}>🔑</span> Вход
+              </Link>
+              <Link to="/register">
+                <span style={{fontSize: '22px'}}>📝</span> Регистрация
+              </Link>
+            </>
+          )}
+        </div>
+      </div>
+    </nav>
+  );
+};
+</file>
+
+<file path="frontend/src/context/AuthContext.jsx">
+import { createContext, useState } from 'react';
+
+export const AuthContext = createContext();
+
+export const AuthProvider = ({ children }) => {
+  // Ленивая инициализация: считываем пользователя из localStorage при старте приложения
+  const [user, setUser] = useState(() => {
+    const savedUser = localStorage.getItem('user');
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
+
+  // Централизованный вход: сохраняем данные и в стейт, и в память браузера
+  const login = (userData, token) => {
+    setUser(userData);
+    localStorage.setItem('user', JSON.stringify(userData));
+    localStorage.setItem('token', token);
+  };
+
+  // Централизованный выход: очищаем всё
+  const logout = () => {
+    setUser(null);
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+</file>
+
+<file path="frontend/src/context/CartContext.jsx">
+import { createContext, useState } from 'react';
+
+export const CartContext = createContext();
+
+export const CartProvider = ({ children }) => {
+  const [cart, setCart] = useState([]);
+
+  // Добавление товара с проверкой остатка в БД
+  const addToCart = (product) => {
+    setCart((prevCart) => {
+      const existingItem = prevCart.find((item) => item.id === product.id);
+      
+      if (existingItem) {
+        // Если в корзине уже лежит максимум того, что есть на складе
+        if (existingItem.quantity >= product.stock) {
+          alert(`Разместить больше нельзя. На складе осталось всего: ${product.stock} шт.`);
+          return prevCart;
+        }
+        return prevCart.map((item) =>
+          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+        );
+      }
+
+      // Если товара вообще нет на складе
+      if (product.stock <= 0) {
+        alert("Извините, этого товара нет в наличии.");
+        return prevCart;
+      }
+
+      return [...prevCart, { ...product, quantity: 1 }];
+    });
+    alert(`"${product.title}" добавлен в корзину!`);
+  };
+
+  // Изменение количества через кнопки +/- с проверкой лимита склада
+  const updateQuantity = (productId, amount) => {
+    setCart((prevCart) =>
+      prevCart
+        .map((item) => {
+          if (item.id === productId) {
+            const newQty = item.quantity + amount;
+            
+            // Если пытаемся нажать "+" выше доступного на складе
+            if (amount > 0 && newQty > item.stock) {
+              alert(`Невозможно добавить больше. Доступный остаток: ${item.stock} шт.`);
+              return item;
+            }
+            
+            return newQty > 0 ? { ...item, quantity: newQty } : null;
+          }
+          return item;
+        })
+        .filter(Boolean)
+    );
+  };
+
+  const removeFromCart = (productId) => {
+    setCart((prevCart) => prevCart.filter((item) => item.id !== productId));
+  };
+
+  const clearCart = () => setCart([]);
+
+  return (
+    <CartContext.Provider value={{ cart, addToCart, updateQuantity, removeFromCart, clearCart }}>
+      {children}
+    </CartContext.Provider>
+  );
+};
+</file>
+
+<file path="frontend/src/pages/Admin.jsx">
+import { useContext, useState, useEffect } from 'react';
+import { AuthContext } from '../context/AuthContext';
+import { Navigate } from 'react-router-dom';
+
+export const Admin = () => {
+  const { user } = useContext(AuthContext);
+  
+  const [activeTab, setActiveTab] = useState('add'); // 'add' или 'manage'
+  const [products, setProducts] = useState([]);
+  
+  // Поля формы
+  const [editingId, setEditingId] = useState(null); 
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [price, setPrice] = useState('');
+  const [stock, setStock] = useState('');
+  const [images, setImages] = useState(['']); 
+
+  useEffect(() => {
+    if (activeTab === 'manage') {
+      fetchProducts();
+    }
+  }, [activeTab]);
+
+  const fetchProducts = () => {
+    fetch('/api/products')
+      .then(res => res.json())
+      .then(data => setProducts(data))
+      .catch(err => console.error(err));
+  };
+
+  if (!user || user.role !== 'admin') return <Navigate to="/" />;
+
+  // Управление массивом картинок
+  const handleImageChange = (index, value) => {
+    const newImages = [...images];
+    newImages[index] = value;
+    setImages(newImages);
+  };
+
+  const addImageField = () => setImages([...images, '']);
+  const removeImageField = (index) => setImages(images.filter((_, i) => i !== index));
+
+  // Сохранение / Изменение
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const token = localStorage.getItem('token');
+    const cleanImages = images.filter(url => url.trim() !== '');
+
+    const url = editingId ? `/api/products/${editingId}` : '/api/products';
+    const method = editingId ? 'PUT' : 'POST';
+
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ title, description, price: Number(price), stock: Number(stock), image_urls: cleanImages })
+      });
+      
+      if (res.ok) {
+        alert(editingId ? "Товар успешно обновлен!" : "Товар успешно добавлен!");
+        resetForm();
+        setActiveTab('manage');
+      } else {
+        const err = await res.json();
+        alert(err.error || "Ошибка при сохранении");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // УДАЛЕНИЕ ТОВАРА (Теперь с выводом ошибок сервера)
+  const handleDelete = async (id) => {
+    if (!window.confirm("Вы точно хотите удалить этот товар с концами?")) return;
+    const token = localStorage.getItem('token');
+
+    try {
+      const res = await fetch(`/api/products/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (res.ok) {
+        // Если сервер удалил, убираем товар из списка на экране
+        setProducts(products.filter(p => p.id !== id));
+        alert("Товар успешно удален с витрины.");
+      } else {
+        // Если сервер вернул ошибку (например, 401 или 403)
+        const errData = await res.json();
+        alert(`Не удалось удалить: ${errData.error || "Ошибка сервера"}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Ошибка сети. Не удалось связаться с бэкендом.");
+    }
+  };
+
+  // Включение режима редактирования
+  const startEdit = (product) => {
+    setEditingId(product.id);
+    setTitle(product.title);
+    setDescription(product.description);
+    setPrice(product.price);
+    setStock(product.stock);
+    setImages(product.image_urls && product.image_urls.length > 0 ? product.image_urls : ['']);
+    setActiveTab('add');
+  };
+
+  const resetForm = () => {
+    setEditingId(null);
+    setTitle('');
+    setDescription('');
+    setPrice('');
+    setStock('');
+    setImages(['']);
+  };
+
+  return (
+    <div style={{ maxWidth: '800px', margin: '30px auto' }}>
+      {/* Навигация панели */}
+      <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
+        <button 
+          className="btn-primary" 
+          style={{ background: activeTab === 'add' ? 'var(--gradient-primary)' : '#cbd5e1', width: 'auto' }}
+          onClick={() => { setActiveTab('add'); if(!editingId) resetForm(); }}
+        >
+          {editingId ? "📝 Редактирование" : "➕ Добавить товар"}
+        </button>
+        <button 
+          className="btn-primary" 
+          style={{ background: activeTab === 'manage' ? 'var(--gradient-primary)' : '#cbd5e1', width: 'auto' }}
+          onClick={() => { setActiveTab('manage'); resetForm(); }}
+        >
+          📋 Управление витриной ({products.length})
+        </button>
+      </div>
+
+      {/* ВКЛАДКА 1: ФОРМА */}
+      {activeTab === 'add' && (
+        <div className="card" style={{ maxWidth: '100%', margin: 0 }}>
+          <h2 style={{ marginBottom: '20px', color: 'var(--wb-purple)' }}>
+            {editingId ? `Редактирование товара #${editingId}` : "Новая карточка товара"}
+          </h2>
+          <form onSubmit={handleSubmit}>
+            <input type="text" placeholder="Название" required className="input-field" value={title} onChange={e => setTitle(e.target.value)} />
+            <textarea placeholder="Описание" required className="input-field" style={{ minHeight: '80px', fontFamily: 'inherit' }} value={description} onChange={e => setDescription(e.target.value)} />
+            
+            <div style={{ display: 'flex', gap: '15px' }}>
+              <input type="number" placeholder="Цена (₽)" required className="input-field" value={price} onChange={e => setPrice(e.target.value)} />
+              <input type="number" placeholder="Количество на склад" required className="input-field" value={stock} onChange={e => setStock(e.target.value)} />
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ fontSize: '14px', fontWeight: 'bold', display: 'block', marginBottom: '10px' }}>Ссылки на фотографии:</label>
+              {images.map((url, idx) => (
+                <div key={idx} style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                  <input 
+                    type="text" placeholder={`Ссылка на фото #${idx + 1}`} className="input-field" style={{ margin: 0 }}
+                    value={url} onChange={e => handleImageChange(idx, e.target.value)} 
+                  />
+                  {images.length > 1 && (
+                    <button type="button" onClick={() => removeImageField(idx)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '0 15px', borderRadius: '12px', cursor: 'pointer' }}>❌</button>
+                  )}
+                </div>
+              ))}
+              <button type="button" onClick={addImageField} style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', marginTop: '5px' }}>
+                + Добавить еще ссылку на фото
+              </button>
+            </div>
+
+            <button type="submit" className="btn-primary">{editingId ? "Сохранить изменения" : "Выкатить на маркетплейс"}</button>
+          </form>
+        </div>
+      )}
+
+      {/* ВКЛАДКА 2: ТАБЛИЦА ТОВАРОВ */}
+      {activeTab === 'manage' && (
+        <div style={{ background: 'white', padding: '25px', borderRadius: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
+          <h2 style={{ marginBottom: '20px' }}>Все товары в базе данных</h2>
+          {products.length === 0 ? <p>Товары отсутствуют.</p> : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #eee', height: '40px', color: 'var(--text-muted)' }}>
+                    <th>Фото</th>
+                    <th>Название</th>
+                    <th>Цена</th>
+                    <th>Склад</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.map(p => (
+                    <tr key={p.id} style={{ borderBottom: '1px solid #f5f5f5', height: '60px' }}>
+                      <td>
+                        <img 
+                          src={p.image_urls && p.image_urls[0] ? p.image_urls[0] : 'https://images.unsplash.com/photo-1555252333-9f8e92e65df9?w=100'} 
+                          alt="" style={{ width: '40px', height: '50px', objectFit: 'cover', borderRadius: '6px', marginTop: '5px' }} 
+                        />
+                      </td>
+                      <td style={{ fontWeight: '600' }}>{p.title}</td>
+                      <td>{p.price} ₽</td>
+                      <td style={{ color: p.stock > 0 ? '#10b981' : '#ef4444', fontWeight: 'bold' }}>{p.stock} шт.</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                          <button onClick={() => startEdit(p)} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer' }}>Изменить</button>
+                          <button onClick={() => handleDelete(p.id)} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer' }}>Удалить</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+</file>
+
+<file path="frontend/src/pages/Cart.jsx">
+import { useContext } from 'react';
+import { CartContext } from '../context/CartContext.jsx';
+import { AuthContext } from '../context/AuthContext.jsx';
+
+export const Cart = () => {
+  const { cart, updateQuantity, removeFromCart, clearCart } = useContext(CartContext);
+  const { user } = useContext(AuthContext);
+
+  const total = cart.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
+
+  const handlePayment = async () => {
+    if (!user) return alert("Вы должны войти в систему для оплаты заказа!");
+    if (cart.length === 0) return alert("Ваша корзина пуста!");
+    
+    const token = localStorage.getItem('token');
+    
+    // Формируем компактный массив товаров для отправки на бэкенд
+    const orderItems = cart.map(item => ({
+      id: item.id,
+      quantity: item.quantity
+    }));
+
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ total, items: orderItems })
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        alert(`🎉 Заказ успешно оплачен!\nНомер заказа: #00${data.orderId}\nОстатки на складе автоматически обновлены для всех покупателей.`);
+        clearCart(); // Очищаем корзину во фронтенде после успешного списания
+      } else {
+        alert(`Ошибка: ${data.error || "Не удалось совершить покупку"}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Ошибка при обработке платежа сервером.");
+    }
+  };
+
+  return (
+    <div style={{ background: 'white', padding: '30px', borderRadius: '20px', marginTop: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)' }}>
+      <h2 style={{ fontSize: '26px', marginBottom: '20px' }}>Корзина</h2>
+      
+      {cart.length === 0 ? (
+        <p style={{ marginTop: '15px', color: 'var(--text-muted)' }}>В корзине пока пусто. Самое время что-нибудь выбрать!</p>
+      ) : (
+        <ul style={{ listStyle: 'none', padding: 0, marginTop: '15px' }}>
+          {cart.map((item) => (
+            <li 
+              key={item.id} 
+              style={{ 
+                borderBottom: '1px solid #f0f0f0', 
+                padding: '20px 0', 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '15px'
+              }}
+            >
+              <div style={{ flex: '1', minWidth: '200px' }}>
+                <span style={{ fontWeight: '600', fontSize: '16px' }}>{item.title}</span>
+                <div style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '4px' }}>
+                  {item.price} ₽ / шт. <span style={{ color: '#10b981' }}>(доступно: {item.stock} шт.)</span>
+                </div>
+              </div>
+
+              {/* Управление количеством */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#f4f6f8', padding: '6px 12px', borderRadius: '10px' }}>
+                <button 
+                  onClick={() => updateQuantity(item.id, -1)}
+                  style={{ background: 'none', border: 'none', fontWeight: 'bold', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}
+                >
+                  −
+                </button>
+                <span style={{ fontWeight: '700', minWidth: '20px', textAlign: 'center' }}>{item.quantity}</span>
+                <button 
+                  onClick={() => updateQuantity(item.id, 1)}
+                  style={{ background: 'none', border: 'none', fontWeight: 'bold', fontSize: '18px', cursor: 'pointer', padding: '0 5px' }}
+                >
+                  +
+                </button>
+              </div>
+
+              {/* Стоимость */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                <strong style={{ fontSize: '18px', minWidth: '90px', textAlign: 'right' }}>
+                  {item.price * item.quantity} ₽
+                </strong>
+                <button 
+                  onClick={() => removeFromCart(item.id)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#ef4444' }}
+                >
+                  🗑️
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      
+      {/* Детали заказа */}
+      <div style={{ marginTop: '35px', padding: '25px', background: '#f8f9fc', borderRadius: '16px', border: '1px solid #f1f5f9' }}>
+        <h3 style={{ fontSize: '18px', marginBottom: '15px' }}>Детали заказа</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', margin: '15px 0' }}>
+          <span style={{ color: 'var(--text-muted)' }}>Итого к оплате:</span>
+          <strong style={{ fontSize: '24px', color: 'var(--wb-purple)' }}>{total} ₽</strong>
+        </div>
+        
+        <button 
+          onClick={handlePayment}
+          className="btn-primary"
+          style={{ 
+            marginTop: '10px',
+            background: (cart.length > 0 && user) ? 'var(--gradient-primary)' : '#cbd5e1', 
+            cursor: (cart.length > 0 && user) ? 'pointer' : 'not-allowed' 
+          }}
+          disabled={cart.length === 0 || !user}
+        >
+          {!user ? "Войдите в аккаунт для оплаты" : "Оплатить заказ"}
+        </button>
+      </div>
+    </div>
+  );
+};
+</file>
+
+<file path="frontend/src/pages/Catalog.jsx">
+import { useEffect, useState, useContext } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { CartContext } from '../context/CartContext.jsx';
+import { AuthContext } from '../context/AuthContext.jsx';
+
+const getImagesArray = (product) => {
+  if (product.image_urls && product.image_urls.length > 0) {
+    return product.image_urls;
+  }
+  // Заглушки, если картинок вообще нет
+  const titleLower = product.title.toLowerCase();
+  if (titleLower.includes('подушка')) return ['https://images.unsplash.com/photo-1629215160822-0d17e7ce71c6?w=600'];
+  if (titleLower.includes('молокоотсос')) return ['https://images.unsplash.com/photo-1519689680058-324335c77eba?w=600'];
+  if (titleLower.includes('слинг')) return ['https://images.unsplash.com/photo-1522771930-78848d9287dd?w=600'];
+  if (titleLower.includes('сумка')) return ['https://images.unsplash.com/photo-1555244406-38f32860b0ec?w=600'];
+  return ['https://images.unsplash.com/photo-1555252333-9f8e92e65df9?w=600'];
+};
+
+export const Catalog = () => {
+  const [products, setProducts] = useState([]);
+  const [selectedProduct, setSelectedProduct] = useState(null); 
+  const [activeImgIdx, setActiveImgIdx] = useState(0); // Активная картинка в галерее
+  
+  const { addToCart } = useContext(CartContext);
+  const { user } = useContext(AuthContext); 
+  
+  const [searchParams] = useSearchParams();
+  const searchQuery = searchParams.get('q') || '';
+
+  useEffect(() => {
+    fetch('/api/products')
+      .then(res => res.json())
+      .then(data => setProducts(data))
+      .catch(err => console.error("Ошибка загрузки:", err));
+  }, []);
+
+  const filteredProducts = products.filter(product => {
+    const query = searchQuery.toLowerCase();
+    return product.title.toLowerCase().includes(query) || 
+           (product.description && product.description.toLowerCase().includes(query));
+  });
+
+  // --- РЕЖИМ 1: ПОДРОБНОЕ ОПИСАНИЕ ТОВАРА (ГАЛЕРЕЯ С МИНИАТЮРАМИ WB) ---
+  if (selectedProduct) {
+    const productImages = getImagesArray(selectedProduct);
+    const isAvailable = selectedProduct.stock > 0;
+
+    return (
+      <div style={{ background: 'white', padding: '30px', borderRadius: '20px', marginTop: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.05)' }}>
+        <button 
+          className="btn-primary" 
+          style={{ width: 'auto', marginBottom: '25px', padding: '10px 20px', background: '#333' }}
+          onClick={() => { setSelectedProduct(null); setActiveImgIdx(0); }}
+        >
+          ← Назад в каталог
+        </button>
+        
+        <div style={{ display: 'flex', gap: '30px', flexWrap: 'wrap' }}>
+          
+          {/* Блок галереи WB */}
+          <div style={{ display: 'flex', gap: '15px' }}>
+            {/* Вертикальный ряд миниатюр */}
+            {productImages.length > 1 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {productImages.map((imgUrl, idx) => (
+                  <img 
+                    key={idx} src={imgUrl} alt="" 
+                    style={{ 
+                      width: '60px', height: '80px', objectFit: 'cover', borderRadius: '8px', cursor: 'pointer',
+                      border: activeImgIdx === idx ? '2px solid var(--wb-purple)' : '2px solid transparent',
+                      opacity: activeImgIdx === idx ? 1 : 0.6
+                    }}
+                    onMouseEnter={() => setActiveImgIdx(idx)}
+                    onClick={() => setActiveImgIdx(idx)}
+                  />
+                ))}
+              </div>
+            )}
+            
+            {/* Главное большое фото */}
+            <div style={{ width: '340px', height: '450px', borderRadius: '12px', overflow: 'hidden', background: '#f8f9fc' }}>
+              <img src={productImages[activeImgIdx]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            </div>
+          </div>
+          
+          {/* Информационный блок */}
+          <div style={{ flex: 1, minWidth: '300px' }}>
+            <h1 style={{ fontSize: '28px', marginBottom: '10px' }}>{selectedProduct.title}</h1>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '15px' }}>Бренд: MomStore</p>
+            
+            <div style={{ fontSize: '14px', fontWeight: '600', color: isAvailable ? '#10b981' : '#ef4444', marginBottom: '15px' }}>
+              {isAvailable ? `В наличии на складе: ${selectedProduct.stock} шт.` : 'Нет в наличии'}
+            </div>
+
+            <div style={{ fontSize: '32px', fontWeight: 'bold', color: 'var(--wb-purple)', marginBottom: '25px' }}>
+              {selectedProduct.price} ₽
+            </div>
+            
+            <div style={{ marginBottom: '30px', borderTop: '1px solid #eee', paddingTop: '20px' }}>
+              <h3 style={{ marginBottom: '10px' }}>Описание товара</h3>
+              <p style={{ lineHeight: '1.6', color: '#555', whiteSpace: 'pre-wrap' }}>
+                {selectedProduct.description}
+              </p>
+            </div>
+
+            <button 
+              className="btn-primary"
+              style={{ maxWidth: '300px', background: (user && isAvailable) ? 'var(--gradient-primary)' : '#cbd5e1', cursor: (user && isAvailable) ? 'pointer' : 'not-allowed' }}
+              onClick={() => user ? addToCart(selectedProduct) : alert("Пожалуйста, авторизуйтесь.")}
+              disabled={!user || !isAvailable}
+            >
+              {!user ? "Войдите для покупки" : !isAvailable ? "Нет в наличии" : "Добавить в корзину"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- РЕЖИМ 2: СЕТКА КАТАЛОГА ---
+  return (
+    <div>
+      <h2 style={{ fontSize: '28px', marginBottom: '20px' }}>
+        {searchQuery ? `Результаты поиска: "${searchQuery}"` : 'Хиты продаж'}
+      </h2>
+      
+      {filteredProducts.length === 0 ? (
+        <p style={{ color: 'var(--text-muted)' }}>Ничего не найдено 😔</p>
+      ) : (
+        <div className="catalog-grid">
+          {filteredProducts.map(product => {
+            const productImages = getImagesArray(product);
+            const isAvailable = product.stock > 0;
+
+            return (
+              <div key={product.id} className="product-card" style={{ cursor: 'pointer' }} onClick={() => setSelectedProduct(product)}>
+                <div className="product-image-placeholder" style={{ padding: 0, background: 'transparent' }}>
+                  <img src={productImages[0]} alt={product.title} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '12px' }} />
+                </div>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div className="product-price">{product.price} ₽</div>
+                  <div style={{ fontSize: '12px', fontWeight: '600', color: isAvailable ? '#10b981' : '#ef4444' }}>
+                    {isAvailable ? `${product.stock} шт.` : 'Ожидается'}
+                  </div>
+                </div>
+
+                <div className="product-title">
+                  <strong>MomStore</strong> / {product.title}
+                </div>
+                
+                <button 
+                  className="btn-primary"
+                  style={{ background: (user && isAvailable) ? 'var(--gradient-primary)' : '#cbd5e1', cursor: (user && isAvailable) ? 'pointer' : 'not-allowed' }}
+                  disabled={!user || !isAvailable}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    addToCart(product);
+                  }}
+                >
+                  {!user ? "Нужен вход" : !isAvailable ? "Закончился" : "В корзину"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+</file>
+
+<file path="frontend/src/pages/Login.jsx">
+import { useState, useContext } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { AuthContext } from '../context/AuthContext';
+
+export const Login = () => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const { login } = useContext(AuthContext);
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+        // Сохраняем токен и обновляем контекст
+        localStorage.setItem('token', data.token);
+        login(data.user);
+        navigate('/'); // Перекидываем на главную
+      } else {
+        alert(data.error);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>Вход</h2>
+      <form onSubmit={handleSubmit}>
+        <input 
+          type="email" placeholder="Email" required
+          className="input-field"
+          value={email} onChange={(e) => setEmail(e.target.value)} 
+        />
+        <input 
+          type="password" placeholder="Пароль" required
+          className="input-field"
+          value={password} onChange={(e) => setPassword(e.target.value)} 
+        />
+        <button type="submit" className="btn-primary">Войти</button>
+      </form>
+    </div>
+  );
+};
+</file>
+
+<file path="frontend/src/pages/Profile.jsx">
+export const Profile = () => {
+  return (
+    <div>
+      <h2>Профиль пользователя</h2>
+      <p>Здесь будет история заказов и статусы.</p>
+    </div>
+  );
+};
+</file>
+
+<file path="frontend/src/pages/Register.jsx">
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+export const Register = () => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      
+      if (res.ok) {
+        alert("Успешная регистрация! Теперь вы можете войти.");
+        navigate('/login');
+      } else {
+        const data = await res.json();
+        alert(data.error);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>Регистрация</h2>
+      <form onSubmit={handleSubmit}>
+        <input 
+          type="email" placeholder="Email" required
+          className="input-field"
+          value={email} onChange={(e) => setEmail(e.target.value)} 
+        />
+        <input 
+          type="password" placeholder="Пароль" required
+          className="input-field"
+          value={password} onChange={(e) => setPassword(e.target.value)} 
+        />
+        <button type="submit" className="btn-primary">Зарегистрироваться</button>
+      </form>
+    </div>
+  );
+};
+</file>
+
+<file path="frontend/src/App.jsx">
+import { Routes, Route } from 'react-router-dom';
+import { Navbar } from './components/Navbar';
+import { Catalog } from './pages/Catalog';
+import { Cart } from './pages/Cart';
+import { Login } from './pages/Login';
+import { Register } from './pages/Register';
+import { Profile } from './pages/Profile';
+import { Admin } from './pages/Admin';
+
+function App() {
+  return (
+    <div>
+      <Navbar /> {/* Шапка теперь на всю ширину */}
+      <div className="container"> {/* Ограничитель ширины только для страниц */}
+        <Routes>
+          <Route path="/" element={<Catalog />} />
+          <Route path="/cart" element={<Cart />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/admin" element={<Admin />} />
+        </Routes>
+      </div>
+    </div>
+  );
+}
+export default App;
+</file>
+
+<file path="frontend/src/index.css">
+:root {
+  --wb-purple: #cb11ab;
+  --gradient-primary: linear-gradient(135deg, #cb11ab 0%, #ff33c4 100%);
+  --bg-gray: #f4f6f8; /* Более мягкий современный фон */
+  --text-main: #1f2937;
+  --text-muted: #6b7280;
+  --card-radius: 20px; /* Более округлые углы */
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  /* Новый шрифт Inter */
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  background-color: var(--bg-gray);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* --- Шапка (Navbar) --- */
+.nav {
+  background: var(--gradient-primary); /* Градиент в шапке */
+  padding: 15px 0;
+  margin-bottom: 30px;
+  box-shadow: 0 4px 20px rgba(203, 17, 171, 0.2);
+}
+
+.nav-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+
+.nav-logo {
+  font-size: 26px;
+  font-weight: 800;
+  color: white;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  letter-spacing: -0.5px;
+}
+
+/* Значок возле логотипа */
+.logo-icon {
+  background: white;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  transition: transform 0.3s ease;
+}
+
+.nav-logo:hover .logo-icon {
+  transform: rotate(-10deg) scale(1.1);
+}
+
+.nav-links {
+  display: flex;
+  gap: 25px;
+  align-items: center;
+}
+
+.nav-links a, .nav-links button {
+  color: white;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.nav-links a:hover, .nav-links button:hover {
+  opacity: 0.8;
+  transform: translateY(-2px);
+}
+
+/* --- Каталог и карточки товаров --- */
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 25px;
+  padding-bottom: 40px;
+}
+
+.product-card {
+  background: white;
+  border-radius: var(--card-radius);
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* Мягкая современная тень */
+  box-shadow: 0 4px 6px rgba(0,0,0,0.02), 0 10px 15px -3px rgba(0,0,0,0.03);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+}
+
+.product-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 20px 25px -5px rgba(0,0,0,0.08), 0 10px 10px -5px rgba(0,0,0,0.04);
+}
+
+.product-image-placeholder {
+  width: 100%;
+  aspect-ratio: 3/4;
+  background-color: #f8f9fc;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.product-price {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.product-title {
+  font-size: 15px;
+  color: var(--text-main);
+  line-height: 1.5;
+  flex-grow: 1;
+}
+
+/* --- Кнопки и формы --- */
+.btn-primary {
+  background: var(--gradient-primary);
+  color: white;
+  border: none;
+  padding: 14px;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s;
+  width: 100%;
+  font-size: 15px;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: scale(1.02);
+  box-shadow: 0 8px 20px rgba(203, 17, 171, 0.3);
+  filter: brightness(1.1);
+}
+
+.btn-primary:disabled {
+  background: #cbd5e1;
+  color: #64748b;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.card {
+  background: white;
+  padding: 40px;
+  border-radius: var(--card-radius);
+  max-width: 400px;
+  margin: 40px auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+}
+
+.input-field {
+  width: 100%;
+  padding: 14px 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  margin-bottom: 15px;
+  font-size: 16px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.input-field:focus {
+  border-color: var(--wb-purple);
+  box-shadow: 0 0 0 3px rgba(203, 17, 171, 0.1);
+}
+
+/* --- Анимация поиска (Эффект стекла) --- */
+.search-form {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px); /* Эффект матового стекла */
+  border-radius: 24px;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+  margin: 0 15px;
+}
+
+.search-form.active {
+  background-color: white;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.search-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  padding: 10px 15px;
+  cursor: pointer;
+  color: white;
+  transition: color 0.3s ease;
+}
+
+.search-form.active .search-btn {
+  color: var(--wb-purple);
+}
+
+.nav-search {
+  width: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 15px;
+  font-weight: 500;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), padding 0.4s ease;
+}
+
+.nav-search.expanded {
+  width: 280px;
+  padding: 10px 20px 10px 0;
+}
+</file>
+
+<file path="frontend/src/main.jsx">
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import App from './App.jsx';
+import { CartProvider } from './context/CartContext.jsx';
+import { AuthProvider } from './context/AuthContext.jsx';
+import './index.css'; // ДОБАВЛЕН ИМПОРТ СТИЛЕЙ
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <AuthProvider>
+        <CartProvider>
+          <App />
+        </CartProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  </React.StrictMode>
+);
+</file>
+
+<file path="frontend/Dockerfile">
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 5173
+CMD ["npm", "run", "dev", "--", "--host"]
+</file>
+
+<file path="frontend/index.html">
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍼</text></svg>">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <title>MomStore — Товары для мам и малышей</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+</file>
+
+<file path="frontend/package.json">
+{
+  "name": "momstore-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.0",
+    "vite": "^5.0.0"
+  }
+}
+</file>
+
+<file path="frontend/vite.config.js">
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: true,
+    proxy: {
+      '/api': {
+        target: 'http://backend:5000',
+        changeOrigin: true
+      }
+    }
+  }
+})
+</file>
+
+<file path="docker-compose.yml">
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: momstore
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - DB_NAME=momstore
+      - PORT=5000
+      - JWT_SECRET=supersecretkey
+    ports:
+      - "5000:5000"
+    depends_on:
+      - db
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:5000
+
+volumes:
+  pgdata:
+</file>
+
+<file path="README.md">
+# mum_store1
+</file>
+
+</files>
